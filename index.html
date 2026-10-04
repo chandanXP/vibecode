@@ -1,0 +1,185 @@
+<!-- index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nemotron Ultra 550B - Gemini Clone</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <style>
+        body { background-color: #0F172A; color: #E2E8F0; }
+        .prose pre { background: #1E293B; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; }
+        .prose code { background: #1E293B; padding: 0.2rem 0.4rem; border-radius: 0.25rem; font-family: monospace; }
+        .thought-box { border-left: 3px solid #3B82F6; background: rgba(59, 130, 246, 0.1); padding: 12px; margin-bottom: 12px; border-radius: 0 0.5rem 0.5rem 0; font-size: 0.9rem; color: #94A3B8; }
+        details > summary { cursor: pointer; color: #60A5FA; font-weight: bold; margin-bottom: 0.5rem; list-style: none;}
+        details > summary::-webkit-details-marker { display: none; }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0F172A; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden">
+
+    <!-- Sidebar Configuration -->
+    <aside class="w-80 bg-slate-900 border-r border-slate-700 p-6 flex flex-col gap-6 overflow-y-auto hidden md:flex">
+        <h1 class="text-xl font-bold text-blue-500 tracking-wide">Nemotron Workspace</h1>
+        
+        <div class="space-y-4">
+            <div>
+                <label class="block text-sm text-slate-400 mb-1">Temperature (<span id="temp-val">0.7</span>)</label>
+                <input type="range" id="temp" min="0" max="2" step="0.1" value="0.7" class="w-full accent-blue-500" oninput="document.getElementById('temp-val').innerText = this.value">
+            </div>
+            <div>
+                <label class="block text-sm text-slate-400 mb-1">Max Context Tokens</label>
+                <input type="number" id="tokens" value="32768" class="w-full bg-slate-800 rounded p-2 text-sm text-slate-200 border border-slate-700">
+                <p class="text-xs text-slate-500 mt-1">NVIDIA Native: Up to 1M Tokens</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <input type="checkbox" id="thinking" checked class="w-5 h-5 accent-blue-500 cursor-pointer">
+                <label for="thinking" class="text-sm font-semibold cursor-pointer">Enable Agentic Thinking</label>
+            </div>
+        </div>
+
+        <div class="mt-auto p-4 bg-slate-800 rounded-lg border border-slate-700">
+            <h3 class="font-bold text-blue-400 mb-3 text-sm">Ultra 550B Features:</h3>
+            <ul class="text-xs space-y-3 text-slate-300">
+                <li>🚀 <strong>LatentMoE (55B/550B)</strong>: Hybrid Mamba2-Transformer architecture.</li>
+                <li>⚡ <strong>MTP</strong>: Multi-Token Prediction for native speculative decoding.</li>
+                <li>🧠 <strong>Reasoning Trace</strong>: Direct access to inner scratchpads.</li>
+            </ul>
+        </div>
+    </aside>
+
+    <!-- Main Chat Window -->
+    <main class="flex-1 flex flex-col relative h-full">
+        <div id="chat-container" class="flex-1 overflow-y-auto p-6 md:p-10 pb-32">
+            <div id="chat-history" class="max-w-4xl mx-auto flex flex-col gap-8">
+                <!-- Initial Welcome -->
+                <div class="flex flex-col gap-2">
+                    <div class="font-bold text-blue-400">System</div>
+                    <div class="prose prose-invert max-w-none">Ready to code. Utilizing Nemotron-3 Ultra 550B via NVIDIA API.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Input Area -->
+        <div class="absolute bottom-0 w-full p-4 bg-gradient-to-t from-slate-900 via-slate-900 to-transparent">
+            <div class="max-w-4xl mx-auto relative flex items-center">
+                <textarea id="user-input" rows="3" placeholder="Ask Nemotron to write a complex system..." class="w-full bg-slate-800 border border-slate-600 rounded-xl p-4 pr-16 text-slate-100 focus:outline-none focus:border-blue-500 resize-none shadow-xl"></textarea>
+                <button onclick="sendMessage()" class="absolute right-4 bottom-4 bg-blue-600 hover:bg-blue-500 text-white p-2 rounded-lg transition">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let messages = [];
+
+        async function sendMessage() {
+            const inputEl = document.getElementById('user-input');
+            const text = inputEl.value.trim();
+            if (!text) return;
+
+            // Render User Message
+            appendMessage('You', text, 'user');
+            messages.push({ role: 'user', content: text });
+            inputEl.value = '';
+
+            // Setup AI Response Wrapper
+            const wrapper = document.createElement('div');
+            wrapper.className = 'flex flex-col gap-2 mb-4';
+            wrapper.innerHTML = `<div class="font-bold text-blue-400 flex items-center gap-2">Nemotron Ultra <span class="animate-pulse w-2 h-2 bg-blue-500 rounded-full inline-block"></span></div>`;
+            
+            const details = document.createElement('details');
+            details.className = 'thought-box hidden';
+            details.setAttribute('open', '');
+            details.innerHTML = `<summary>Agentic Reasoning Trace</summary><div class="whitespace-pre-wrap text-sm" id="reasoning-${messages.length}"></div>`;
+            wrapper.appendChild(details);
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'prose prose-invert max-w-none mt-2';
+            wrapper.appendChild(contentDiv);
+
+            document.getElementById('chat-history').appendChild(wrapper);
+            window.scrollTo(0, document.body.scrollHeight);
+
+            // Fetch and Stream
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        messages: messages,
+                        temperature: document.getElementById('temp').value,
+                        top_p: 0.95,
+                        max_tokens: document.getElementById('tokens').value,
+                        enable_thinking: document.getElementById('thinking').checked
+                    })
+                });
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let fullReasoning = "";
+                let fullContent = "";
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) {
+                        hljs.highlightAll();
+                        messages.push({ role: 'assistant', content: fullContent });
+                        break;
+                    }
+
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split('\n\n');
+                    
+                    for (const msg of lines) {
+                        if (msg.startsWith('data: ')) {
+                            const dataStr = msg.replace('data: ', '').trim();
+                            if (dataStr === '[DONE]') continue;
+                            if (!dataStr) continue;
+                            
+                            try {
+                                const data = JSON.parse(dataStr);
+                                if (data.type === 'reasoning') {
+                                    details.classList.remove('hidden');
+                                    fullReasoning += data.content;
+                                    details.querySelector('div').textContent = fullReasoning;
+                                } else if (data.type === 'content') {
+                                    details.removeAttribute('open'); // Auto-collapse thinking when final code arrives
+                                    fullContent += data.content;
+                                    contentDiv.innerHTML = marked.parse(fullContent);
+                                }
+                            } catch(e) {}
+                        }
+                    }
+                    window.scrollTo(0, document.body.scrollHeight);
+                }
+            } catch (err) {
+                contentDiv.innerHTML = `<p class="text-red-500">Error connecting to Nemotron: ${err.message}</p>`;
+            }
+        }
+
+        function appendMessage(sender, text, type) {
+            const container = document.getElementById('chat-history');
+            const div = document.createElement('div');
+            div.className = 'flex flex-col gap-2';
+            div.innerHTML = `<div class="font-bold text-slate-300">${sender}</div>
+                             <div class="prose prose-invert max-w-none">${text.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>`;
+            container.appendChild(div);
+        }
+
+        // Allow Enter to send, Shift+Enter for new line
+        document.getElementById('user-input').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>
